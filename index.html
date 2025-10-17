@@ -297,17 +297,26 @@
                     // Spiel läuft: Markierungsmodus
                     cell.setAttribute('contenteditable', 'false');
 
+                    // 1. Visueller Zustand setzen
                     if (cellData.state === 1) {
                         cell.classList.add('bg-player-red', 'text-white', 'shadow-xl', 'ring-4', 'ring-player-red/70');
                     } else if (cellData.state === 2) {
                         cell.classList.add('bg-player-blue', 'text-white', 'shadow-xl', 'ring-4', 'ring-player-blue/70');
                     } else {
-                        // Unmarkiert (klickbar, wenn ich Spieler bin)
-                        cell.classList.add('state-0', 'cell-ready');
-                        if (myRole > 0) {
-                            cell.style.pointerEvents = 'auto'; // Klick für Markierung freigeben
-                        }
+                        // Zustand 0: Unmarkiert
+                        cell.classList.add('state-0'); 
                     }
+                    
+                    // 2. Interaktivität festlegen: Klickbar, wenn unmarkiert ODER eigene Farbe
+                    const isInteractive = myRole > 0 && (cellData.state === 0 || cellData.state === myRole);
+                    
+                    if (isInteractive) {
+                        cell.style.pointerEvents = 'auto'; // Klick für Markierung/Rücksetzung freigeben
+                        cell.classList.add('cell-ready'); // Setzt den Klick-Cursor
+                    } else {
+                        cell.style.pointerEvents = 'none'; // Keine Interaktion (Gegnerfarbe oder Zuschauer)
+                    }
+
                 } else {
                     // Vorbereitungsmodus (Editierbar)
                     cell.classList.add('state-0');
