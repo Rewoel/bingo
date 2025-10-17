@@ -1,0 +1,566 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interaktives 4x4 Bingo-Feld (Multiplayer)</title>
+    <!-- Tailwind CSS wird geladen für das Styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Setzt die Standardschriftart und macht den Text zentriert */
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f7f9fb;
+        }
+        /* Definiert die Größe des Bingo-Feldes und die zentrierte Anzeige */
+        .bingo-grid {
+            max-width: 600px;
+            width: 90vw; /* Responsiv: 90% der Viewport-Breite */
+            aspect-ratio: 1 / 1; /* Hält das Grid quadratisch */
+            gap: 8px; /* Abstand zwischen den Feldern */
+        }
+        /* Styling für ein einzelnes Bingo-Feld */
+        .bingo-cell {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 12px;
+            font-size: 14px;
+            font-weight: 500;
+            text-align: center;
+            border-radius: 12px;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            line-height: 1.2;
+            min-height: 100%;
+            user-select: none; /* Verhindert ungewolltes Markieren von Text beim Klicken */
+        }
+        /* Zustand 0: Unmarkiert (Editierbar) */
+        .state-0 {
+            background-color: #ffffff;
+            color: #374151; /* Grauer Text */
+            border: 2px solid #e5e7eb;
+            cursor: text; /* Text-Cursor, da editierbar */
+        }
+        .state-0:hover {
+            border-color: #9ca3af;
+        }
+        /* Zustand 'Spiel bereit' (Klickbar, wenn nicht markiert) */
+        .cell-ready {
+             cursor: pointer !important; 
+        }
+        /* Zustand 'Markieren blockiert' (wenn Spiel noch nicht gestartet oder nicht Spieler-Rolle) */
+        .cell-locked {
+            cursor: not-allowed;
+            opacity: 0.8;
+            pointer-events: none; /* Deaktiviert alle Klicks */
+        }
+
+        /* Die Scrollbar für editierbare Divs unsichtbar machen */
+        [contenteditable]:focus {
+            outline: none;
+        }
+        .bingo-cell::-webkit-scrollbar {
+            display: none;
+        }
+        /* Container für temporäre Meldungen (z.B. Fehler beim Starten) */
+        .message-box {
+            min-height: 30px;
+        }
+    </style>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'player-red': '#ef4444',
+                        'player-blue': '#3b82f6',
+                        'success-green': '#10b981',
+                        'warning-yellow': '#f59e0b',
+                        'error-red': '#ef4444',
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="p-4 flex flex-col items-center justify-center min-h-screen">
+
+    <header class="text-center mb-6">
+        <h1 class="text-4xl font-extrabold text-gray-900 mb-2">
+            Multiplayer Bingo (4x4)
+        </h1>
+        <p class="text-gray-600 text-lg">
+            Teilen Sie dieses Spiel mit einem Partner!
+        </p>
+    </header>
+    
+    <!-- Anzeige der Benutzer-ID und Rolle -->
+    <div id="roleDisplay" class="mb-4 text-sm font-medium text-gray-700 p-2 bg-gray-100 rounded-lg shadow-inner w-full max-w-lg text-center">
+        Verbinde zu Firebase...
+    </div>
+
+    <!-- Legende und Anweisungen -->
+    <div class="mb-8 w-full max-w-lg bg-white p-4 rounded-xl shadow-lg border border-gray-200">
+        <div class="font-bold text-gray-800 mb-2">Spielregeln:</div>
+        <ul class="space-y-1 text-sm text-gray-600">
+            <li class="flex items-center">
+                <span class="inline-block w-4 h-4 rounded-full bg-white border border-gray-400 mr-2"></span>
+                **Unmarkiert:** Startzustand.
+            </li>
+            <li class="flex items-center">
+                <span class="inline-block w-4 h-4 rounded-full bg-player-red mr-2"></span>
+                **Spieler 1 (Rot):** Kann unmarkierte Felder mit Rot markieren.
+            </li>
+            <li class="flex items-center">
+                <span class="inline-block w-4 h-4 rounded-full bg-player-blue mr-2"></span>
+                **Spieler 2 (Blau):** Kann unmarkierte Felder mit Blau markieren.
+            </li>
+            <li class="flex items-center">
+                <span class="text-xl mr-2">🔄</span>
+                Eigene Markierungen können zurückgesetzt werden (Klick auf eigene Farbe).
+            </li>
+        </ul>
+    </div>
+
+    <!-- Bingo-Grid Container -->
+    <div id="bingoBoard" class="bingo-grid grid grid-cols-4">
+        <!-- 16 Felder werden hier durch JavaScript hinzugefügt -->
+    </div>
+
+    <!-- Temporäre Meldungsbox -->
+    <div id="messageBox" class="message-box mt-4 text-center font-semibold transition-all duration-300"></div>
+
+    <!-- Button-Container -->
+    <div class="mt-8 flex space-x-4">
+        <button id="startButton" class="px-6 py-2 bg-success-green text-white font-semibold rounded-lg hover:bg-green-600 transition duration-200 shadow-md">
+            Spiel starten
+        </button>
+        <button id="resetButton" class="hidden px-6 py-2 bg-gray-500 text-white font-semibold rounded-lg hover:bg-gray-600 transition duration-200 shadow-md">
+            Board zurücksetzen
+        </button>
+    </div>
+
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, updateDoc, onSnapshot, runTransaction, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+
+        const BOARD_SIZE = 4;
+        const board = document.getElementById('bingoBoard');
+        const startButton = document.getElementById('startButton');
+        const resetButton = document.getElementById('resetButton');
+        const messageBox = document.getElementById('messageBox');
+        
+        // --- Firebase Globals ---
+        // Die Firebase-Konfiguration des Benutzers wird direkt eingebunden.
+        const providedFirebaseConfig = {
+            apiKey: "AIzaSyCRq6xSyFutv34TEs17ERtq1U4NTz_cpBw",
+            authDomain: "bingo-e2b18.firebaseapp.com",
+            projectId: "bingo-e2b18",
+            storageBucket: "bingo-e2b18.firebasestorage.app",
+            messagingSenderId: "221274123621",
+            appId: "1:221274123621:web:ccb08bb091d6d87b1e058c",
+            measurementId: "G-J2W7L79MYM"
+        };
+
+        // Verwenden Sie die explizite Konfiguration
+        const firebaseConfig = providedFirebaseConfig;
+        
+        // Verwenden Sie die Umgebungsvariable für den eindeutigen Artefaktpfad,
+        // mit einem Fallback auf die projectId des Benutzers, falls nicht vorhanden.
+        const appId = typeof __app_id !== 'undefined' ? __app_id : firebaseConfig.projectId;
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        let db = null;
+        let auth = null;
+        let myUserId = null;
+        let myRole = 0; // 0=None/Spectator, 1=Red (Player 1), 2=Blue (Player 2)
+        const GAME_DOC_PATH = `artifacts/${appId}/public/data/bingo_games/main_game`;
+        
+        let gameStateCache = null;
+
+        // Initialer Spielzustand
+        const initialGameState = {
+            cells: Array.from({ length: BOARD_SIZE * BOARD_SIZE }, (_, i) => ({
+                text: `Feld ${i + 1}`,
+                state: 0, // 0: unmarked, 1: Red (Player 1), 2: Blue (Player 2)
+            })),
+            isGameStarted: false,
+            player1Id: null,
+            player2Id: null,
+            lastUpdate: null, // Wird von serverTimestamp überschrieben
+        };
+        
+        // --- UI & Utility Functions ---
+
+        // Funktion zur Erstellung eines einzelnen Bingo-Feldes
+        function createCell(index) {
+            const cell = document.createElement('div');
+            cell.classList.add(
+                'bingo-cell',
+                'state-0',
+                'border',
+                'cell-locked', // Startet gesperrt
+                'select-none'
+            );
+            cell.id = `cell-${index}`;
+            cell.setAttribute('contenteditable', 'true');
+            cell.setAttribute('data-state', '0');
+            cell.innerHTML = `Feld ${index + 1}`; 
+            
+            // Verwende `pointer-events: none` für die Sperrung, der Klick-Handler muss aber immer registriert sein
+            cell.addEventListener('click', handleCellClick);
+            
+            return cell;
+        }
+
+        // Funktion zur Anzeige einer temporären Nachricht
+        function showMessage(text, type = 'warning') {
+            messageBox.textContent = text;
+            messageBox.className = 'message-box mt-4 text-center font-semibold transition-all duration-300'; // Reset classes
+            
+            if (type === 'success') {
+                messageBox.classList.add('text-success-green');
+            } else if (type === 'warning') {
+                messageBox.classList.add('text-warning-yellow');
+            } else if (type === 'error') {
+                 messageBox.classList.add('text-error-red');
+            }
+            
+            // Nachricht nach 3 Sekunden ausblenden, wenn es keine Fehlermeldung ist
+            if (type !== 'error') {
+                 setTimeout(() => {
+                    messageBox.textContent = '';
+                }, 3000);
+            }
+        }
+
+        // Prüft, ob alle Felder mit Text gefüllt sind
+        function checkAllCellsFilled() {
+            const cells = document.querySelectorAll('.bingo-cell');
+            for (const cell of cells) {
+                // Überprüfe den Textinhalt
+                if (cell.textContent.trim() === '') {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        // Aktualisiert das UI basierend auf dem globalen GameStateCache
+        function updateUI(gameState) {
+            gameStateCache = gameState; // Cache aktualisieren
+            const cells = gameState.cells;
+            
+            // 1. Rollen-Display aktualisieren
+            const roleDisplay = document.getElementById('roleDisplay');
+            const roleText = myRole === 1 ? 'Rot (Spieler 1)' : (myRole === 2 ? 'Blau (Spieler 2)' : 'Zuschauer');
+            roleDisplay.innerHTML = `Ihre ID: <span class="text-sm font-mono bg-gray-200 px-1 rounded">${myUserId}</span> | Rolle: <span class="font-bold text-${myRole === 1 ? 'player-red' : (myRole === 2 ? 'player-blue' : 'gray-700')}">${roleText}</span>`;
+
+            // 2. Felder aktualisieren
+            cells.forEach((cellData, index) => {
+                const cell = document.getElementById(`cell-${index}`);
+                if (!cell) return;
+
+                // Inhalt und Zustand synchronisieren
+                cell.innerHTML = cellData.text;
+                cell.dataset.state = cellData.state;
+                
+                // Klassen und Editierbarkeit zurücksetzen
+                cell.classList.remove(
+                    'state-0', 'bg-player-red', 'ring-player-red/70', 
+                    'bg-player-blue', 'ring-player-blue/70',
+                    'text-white', 'shadow-xl', 'ring-4', 'cell-ready', 'cell-locked'
+                );
+                cell.style.pointerEvents = 'none'; // Standardmäßig sperren
+
+                if (gameState.isGameStarted) {
+                    // Spiel läuft: Markierungsmodus
+                    cell.setAttribute('contenteditable', 'false');
+
+                    if (cellData.state === 1) {
+                        cell.classList.add('bg-player-red', 'text-white', 'shadow-xl', 'ring-4', 'ring-player-red/70');
+                    } else if (cellData.state === 2) {
+                        cell.classList.add('bg-player-blue', 'text-white', 'shadow-xl', 'ring-4', 'ring-player-blue/70');
+                    } else {
+                        // Unmarkiert (klickbar, wenn ich Spieler bin)
+                        cell.classList.add('state-0', 'cell-ready');
+                        if (myRole > 0) {
+                            cell.style.pointerEvents = 'auto'; // Klick für Markierung freigeben
+                        }
+                    }
+                } else {
+                    // Vorbereitungsmodus (Editierbar)
+                    cell.classList.add('state-0');
+                    // Nur Spieler 1 darf im Vorbereitungsmodus bearbeiten
+                    cell.setAttribute('contenteditable', myRole === 1 ? 'true' : 'false');
+                    cell.style.pointerEvents = 'auto'; // Klicks für Editieren/Start-Button-Erinnerung
+                }
+            });
+
+            // 3. Button-Status aktualisieren
+            startButton.classList.toggle('hidden', gameState.isGameStarted || myRole !== 1);
+            resetButton.classList.toggle('hidden', !gameState.isGameStarted);
+            
+            // Wenn Spiel läuft und ich nicht Player 1 bin, zeige den Start-Button nicht.
+            if (!gameState.isGameStarted && myRole !== 1) {
+                startButton.textContent = 'Warte auf Spieler 1...';
+                startButton.classList.remove('bg-success-green', 'hover:bg-green-600');
+                startButton.classList.add('bg-gray-400', 'cursor-not-allowed');
+                startButton.style.pointerEvents = 'none';
+            } else if (!gameState.isGameStarted && myRole === 1) {
+                 startButton.textContent = 'Spiel starten';
+                 startButton.classList.add('bg-success-green', 'hover:bg-green-600');
+                 startButton.classList.remove('bg-gray-400', 'cursor-not-allowed');
+                 startButton.style.pointerEvents = 'auto';
+            }
+        }
+
+        // --- Firebase Interaction Functions ---
+
+        async function assignRole(gameDocRef, gameState) {
+            // 1. Überprüfe, ob ich bereits eine Rolle habe
+            if (gameState.player1Id === myUserId) {
+                myRole = 1;
+            } else if (gameState.player2Id === myUserId) {
+                myRole = 2;
+            } else {
+                // 2. Versuche, einen freien Platz zu beanspruchen (Transaktion)
+                try {
+                    await runTransaction(db, async (transaction) => {
+                        const docSnap = await transaction.get(gameDocRef);
+                        const currentData = docSnap.data();
+                        
+                        if (!currentData.player1Id) {
+                            transaction.update(gameDocRef, { player1Id: myUserId });
+                            myRole = 1;
+                        } else if (!currentData.player2Id) {
+                            transaction.update(gameDocRef, { player2Id: myUserId });
+                            myRole = 2;
+                        } else {
+                            myRole = 0; // Zuschauer
+                        }
+                    });
+                } catch (e) {
+                    console.warn("Rollen-Zuweisung fehlgeschlagen (evtl. Race Condition):", e);
+                    // Die onSnapshot wird mit den endgültigen Daten erneut ausgelöst
+                }
+            }
+        }
+
+        function listenToGame() {
+            const gameDocRef = doc(db, GAME_DOC_PATH);
+
+            onSnapshot(gameDocRef, async (docSnap) => {
+                let gameState;
+                
+                if (docSnap.exists()) {
+                    gameState = docSnap.data();
+                    
+                    // Bei jeder Statusänderung: Rolle überprüfen/bestätigen
+                    await assignRole(gameDocRef, gameState);
+
+                } else {
+                    // Dokument existiert nicht, erstelle es (der Ersteller wird Player 1)
+                    console.log("Game document does not exist. Creating new game.");
+                    await setDoc(gameDocRef, { 
+                        ...initialGameState, 
+                        player1Id: myUserId,
+                        lastUpdate: serverTimestamp(),
+                    });
+                    return; // onSnapshot wird mit den neuen Daten erneut ausgelöst
+                }
+
+                // UI mit dem neuen Status aktualisieren
+                updateUI(gameState);
+            }, (error) => {
+                console.error("Firestore listen error:", error);
+                showMessage('Fehler beim Laden des Spielstatus.', 'error');
+            });
+        }
+        
+        // --- Game Logic ---
+
+        // Funktion zum Starten des Spiels (Button-Klick)
+        async function handleStartGame() {
+            if (myRole !== 1) {
+                showMessage('Nur Spieler 1 (Rot) kann das Spiel starten.', 'warning');
+                return;
+            }
+
+            if (!checkAllCellsFilled()) {
+                showMessage('Bitte füllen Sie zuerst alle 16 Felder mit Text aus!', 'warning');
+                return;
+            }
+            
+            const gameDocRef = doc(db, GAME_DOC_PATH);
+            
+            try {
+                // Die endgültigen Texte aus dem DOM in den Zustand übernehmen
+                const cells = Array.from(document.querySelectorAll('.bingo-cell')).map(cell => ({
+                    text: cell.textContent.trim(),
+                    state: 0,
+                }));
+
+                await updateDoc(gameDocRef, {
+                    cells: cells,
+                    isGameStarted: true,
+                    lastUpdate: serverTimestamp(),
+                });
+                
+                showMessage('Das Spiel hat begonnen! Markierungen freigegeben.', 'success');
+
+            } catch (e) {
+                console.error("Fehler beim Starten des Spiels:", e);
+                showMessage('Fehler: Spiel konnte nicht gestartet werden.', 'error');
+            }
+        }
+        
+        // Funktion zum Zurücksetzen des Spiels
+        async function handleResetGame() {
+             if (myRole !== 1) {
+                showMessage('Nur Spieler 1 (Rot) kann das Board zurücksetzen.', 'warning');
+                return;
+            }
+            
+            const gameDocRef = doc(db, GAME_DOC_PATH);
+            
+            // Führe das Zurücksetzen in einer Transaktion durch, um die Rollen zu erhalten
+            try {
+                 await runTransaction(db, async (transaction) => {
+                    const docSnap = await transaction.get(gameDocRef);
+                    if (!docSnap.exists()) throw new Error("Doc not found");
+
+                    const currentData = docSnap.data();
+                    
+                    transaction.set(gameDocRef, {
+                        ...initialGameState,
+                        player1Id: currentData.player1Id, // Behalte Rollen
+                        player2Id: currentData.player2Id, // Behalte Rollen
+                        lastUpdate: serverTimestamp(),
+                    });
+                });
+                showMessage('Board zurückgesetzt. Neue Begriffe können eingegeben werden.', 'success');
+            } catch (e) {
+                 console.error("Fehler beim Zurücksetzen:", e);
+                 showMessage('Fehler: Board konnte nicht zurückgesetzt werden.', 'error');
+            }
+        }
+
+
+        // Funktion, die den Zustand des Feldes umschaltet und die Farbe ändert (Multiplayer-Logik)
+        async function handleCellClick(event) {
+            if (!gameStateCache || !gameStateCache.isGameStarted) {
+                showMessage('Das Spiel ist noch nicht gestartet.', 'warning');
+                return;
+            }
+
+            if (myRole === 0) {
+                showMessage('Sie sind Zuschauer und können nicht markieren.', 'warning');
+                return;
+            }
+
+            const cell = event.currentTarget;
+            const cellIndex = parseInt(cell.id.split('-')[1]);
+            
+            const gameDocRef = doc(db, GAME_DOC_PATH);
+
+            try {
+                // Transaktion, um Race Conditions zu vermeiden
+                await runTransaction(db, async (transaction) => {
+                    const gameDoc = await transaction.get(gameDocRef);
+                    if (!gameDoc.exists()) {
+                        throw "Dokument existiert nicht!";
+                    }
+                    let data = gameDoc.data();
+                    let cells = data.cells;
+                    let cellData = cells[cellIndex];
+                    let currentState = cellData.state;
+
+                    let newCellState = currentState;
+
+                    if (currentState === 0) {
+                        // Von Unmarkiert auf die eigene Farbe setzen
+                        newCellState = myRole; 
+                    } else if (currentState === myRole) {
+                        // Von der eigenen Farbe zurück auf Unmarkiert setzen (Rückgängig)
+                        newCellState = 0;
+                    } else {
+                        // Versucht, die Farbe des Gegners zu überschreiben
+                        showMessage(`Feld ist bereits von Spieler ${3 - myRole} markiert!`, 'warning');
+                        return; // Transaktion abbrechen
+                    }
+
+                    // Nur fortfahren, wenn sich der Zustand geändert hat
+                    if (newCellState !== currentState) {
+                        cellData.state = newCellState;
+                        cells[cellIndex] = cellData;
+
+                        // Commit transaction
+                        transaction.update(gameDocRef, { 
+                            cells: cells,
+                            lastUpdate: serverTimestamp(),
+                        });
+                    }
+                });
+            } catch (e) {
+                console.error("Transaktion fehlgeschlagen:", e);
+                // Die onSnapshot-Funktion wird die lokale UI wieder mit den korrekten Daten synchronisieren.
+            }
+        }
+        
+        // --- Initialization ---
+
+        // Initialisiert das gesamte Board (DOM-Struktur)
+        function initBoardDOM() {
+            for (let i = 0; i < BOARD_SIZE * BOARD_SIZE; i++) {
+                board.appendChild(createCell(i));
+            }
+            
+            // Event Listener zu Buttons hinzufügen
+            startButton.addEventListener('click', handleStartGame);
+            resetButton.addEventListener('click', handleResetGame);
+        }
+
+        async function initFirebase() {
+            //setLogLevel('debug'); // Wichtig für Debugging
+            if (!firebaseConfig) {
+                showMessage('Fehler: Firebase-Konfiguration fehlt.', 'error');
+                return;
+            }
+
+            const app = initializeApp(firebaseConfig);
+            db = getFirestore(app);
+            auth = getAuth(app);
+            
+            // Authentifizierung
+            try {
+                // Wir verwenden weiterhin das Canvas-Initialisierungstoken für die Authentifizierung,
+                // da es für die Canvas-Umgebung erforderlich ist.
+                if (initialAuthToken) {
+                    const userCredential = await signInWithCustomToken(auth, initialAuthToken);
+                    myUserId = userCredential.user.uid;
+                } else {
+                    const userCredential = await signInAnonymously(auth);
+                    myUserId = userCredential.user.uid;
+                }
+            } catch (error) {
+                console.error("Firebase Auth failed:", error);
+                // Notfall: Falls Auth fehlschlägt, verwende eine zufällige ID
+                myUserId = crypto.randomUUID(); 
+            }
+            
+            // Starte DOM und Firestore Listener
+            initBoardDOM();
+            listenToGame();
+        }
+
+        window.onload = initFirebase;
+
+    </script>
+</body>
+</html>
