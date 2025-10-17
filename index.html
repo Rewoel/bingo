@@ -100,27 +100,18 @@
         Verbinde zu Firebase...
     </div>
 
-    <!-- Legende und Anweisungen -->
-    <div class="mb-8 w-full max-w-lg bg-white p-4 rounded-xl shadow-lg border border-gray-200">
-        <div class="font-bold text-gray-800 mb-2">Spielregeln:</div>
-        <ul class="space-y-1 text-sm text-gray-600">
-            <li class="flex items-center">
-                <span class="inline-block w-4 h-4 rounded-full bg-white border border-gray-400 mr-2"></span>
-                **Unmarkiert:** Startzustand.
-            </li>
-            <li class="flex items-center">
-                <span class="inline-block w-4 h-4 rounded-full bg-player-red mr-2"></span>
-                **Spieler 1 (Rot):** Kann unmarkierte Felder mit Rot markieren.
-            </li>
-            <li class="flex items-center">
-                <span class="inline-block w-4 h-4 rounded-full bg-player-blue mr-2"></span>
-                **Spieler 2 (Blau):** Kann unmarkierte Felder mit Blau markieren.
-            </li>
-            <li class="flex items-center">
-                <span class="text-xl mr-2">🔄</span>
-                Eigene Markierungen können zurückgesetzt werden (Klick auf eigene Farbe).
-            </li>
-        </ul>
+    <!-- Rollenauswahl -->
+    <div id="roleSelection" class="mb-8 w-full max-w-lg p-4 rounded-xl text-center bg-white shadow-lg border border-gray-200">
+        <div class="font-bold text-lg text-gray-800 mb-4">Wählen Sie Ihre Rolle/Farbe:</div>
+        <div class="flex justify-center space-x-6">
+            <button id="selectRed" class="px-6 py-3 font-semibold rounded-full text-white transition duration-200 shadow-xl bg-player-red hover:bg-red-600 focus:outline-none focus:ring-4 focus:ring-player-red/50">
+                Spieler 1 (Rot)
+            </button>
+            <button id="selectBlue" class="px-6 py-3 font-semibold rounded-full text-white transition duration-200 shadow-xl bg-player-blue hover:bg-blue-600 focus:outline-none focus:ring-4 focus:ring-player-blue/50">
+                Spieler 2 (Blau)
+            </button>
+        </div>
+        <p id="selectionStatus" class="mt-4 text-sm text-gray-500"></p>
     </div>
 
     <!-- Bingo-Grid Container -->
@@ -154,6 +145,12 @@
         const startButton = document.getElementById('startButton');
         const resetButton = document.getElementById('resetButton');
         const messageBox = document.getElementById('messageBox');
+        
+        // Neue UI-Elemente
+        const roleSelectionDiv = document.getElementById('roleSelection');
+        const selectRedButton = document.getElementById('selectRed');
+        const selectBlueButton = document.getElementById('selectBlue');
+        const selectionStatus = document.getElementById('selectionStatus');
         
         // --- Firebase Globals ---
         // Die Firebase-Konfiguration des Benutzers wird direkt eingebunden.
@@ -251,6 +248,21 @@
             return true;
         }
 
+        /**
+         * Bestimmt die Rolle des Benutzers basierend auf dem aktuellen Spielzustand
+         * und der eigenen Benutzer-ID.
+         */
+        function determineRole(gameState) {
+            if (gameState.player1Id === myUserId) {
+                myRole = 1; // Spieler 1 (Rot)
+            } else if (gameState.player2Id === myUserId) {
+                myRole = 2; // Spieler 2 (Blau)
+            } else {
+                myRole = 0; // Zuschauer
+            }
+        }
+
+
         // Aktualisiert das UI basierend auf dem globalen GameStateCache
         function updateUI(gameState) {
             gameStateCache = gameState; // Cache aktualisieren
@@ -267,7 +279,10 @@
                 if (!cell) return;
 
                 // Inhalt und Zustand synchronisieren
-                cell.innerHTML = cellData.text;
+                // Nur den Text aktualisieren, wenn das Spiel läuft, um Bearbeitungen in P1's Fenster nicht zu überschreiben
+                if (gameState.isGameStarted || myRole !== 1) {
+                    cell.innerHTML = cellData.text;
+                }
                 cell.dataset.state = cellData.state;
                 
                 // Klassen und Editierbarkeit zurücksetzen
@@ -298,57 +313,99 @@
                     cell.classList.add('state-0');
                     // Nur Spieler 1 darf im Vorbereitungsmodus bearbeiten
                     cell.setAttribute('contenteditable', myRole === 1 ? 'true' : 'false');
-                    cell.style.pointerEvents = 'auto'; // Klicks für Editieren/Start-Button-Erinnerung
+                    // Klicks für Editieren/Start-Button-Erinnerung
+                    cell.style.pointerEvents = myRole === 1 ? 'auto' : 'none'; 
                 }
             });
 
             // 3. Button-Status aktualisieren
-            startButton.classList.toggle('hidden', gameState.isGameStarted || myRole !== 1);
-            resetButton.classList.toggle('hidden', !gameState.isGameStarted);
+            const isP1 = myRole === 1;
+            startButton.classList.toggle('hidden', gameState.isGameStarted || !isP1);
+            resetButton.classList.toggle('hidden', !gameState.isGameStarted && !isP1); // Versteckt Reset, wenn Spiel nicht gestartet und ich nicht P1 bin
+
+            // P1 darf den Start-Button sehen, P2/Zuschauer nicht
+            if (!gameState.isGameStarted) {
+                if (isP1) {
+                    startButton.textContent = 'Spiel starten';
+                    startButton.classList.add('bg-success-green', 'hover:bg-green-600');
+                    startButton.classList.remove('bg-gray-400', 'cursor-not-allowed');
+                    startButton.style.pointerEvents = 'auto';
+                } else {
+                    // P2 oder Zuschauer
+                    startButton.textContent = 'Warte auf Spieler 1...';
+                    startButton.classList.remove('bg-success-green', 'hover:bg-green-600');
+                    startButton.classList.add('bg-gray-400', 'cursor-not-allowed');
+                    startButton.style.pointerEvents = 'none';
+                }
+            }
             
-            // Wenn Spiel läuft und ich nicht Player 1 bin, zeige den Start-Button nicht.
-            if (!gameState.isGameStarted && myRole !== 1) {
-                startButton.textContent = 'Warte auf Spieler 1...';
-                startButton.classList.remove('bg-success-green', 'hover:bg-green-600');
-                startButton.classList.add('bg-gray-400', 'cursor-not-allowed');
-                startButton.style.pointerEvents = 'none';
-            } else if (!gameState.isGameStarted && myRole === 1) {
-                 startButton.textContent = 'Spiel starten';
-                 startButton.classList.add('bg-success-green', 'hover:bg-green-600');
-                 startButton.classList.remove('bg-gray-400', 'cursor-not-allowed');
-                 startButton.style.pointerEvents = 'auto';
+            // 4. Rollenauswahl-Status aktualisieren
+            const p1Occupied = gameState.player1Id !== null;
+            const p2Occupied = gameState.player2Id !== null;
+
+            roleSelectionDiv.classList.toggle('hidden', gameState.isGameStarted);
+            
+            if (!gameState.isGameStarted) {
+                selectRedButton.disabled = p1Occupied && gameState.player1Id !== myUserId;
+                selectBlueButton.disabled = p2Occupied && gameState.player2Id !== myUserId;
+                
+                // Update button appearance
+                selectRedButton.classList.toggle('opacity-50', selectRedButton.disabled);
+                selectBlueButton.classList.toggle('opacity-50', selectBlueButton.disabled);
+                
+                if (myRole === 1) {
+                     selectionStatus.textContent = 'Sie sind Spieler 1 (Rot). Starten Sie das Spiel, wenn Sie bereit sind.';
+                } else if (myRole === 2) {
+                     selectionStatus.textContent = 'Sie sind Spieler 2 (Blau). Warten Sie auf den Start durch Spieler 1.';
+                } else {
+                     let statusText = 'Wählen Sie eine verfügbare Rolle.';
+                     if (p1Occupied && p2Occupied) {
+                        statusText = 'Beide Spielerrollen sind belegt. Sie sind Zuschauer.';
+                     }
+                     selectionStatus.textContent = statusText;
+                }
             }
         }
 
         // --- Firebase Interaction Functions ---
 
-        async function assignRole(gameDocRef, gameState) {
-            // 1. Überprüfe, ob ich bereits eine Rolle habe
-            if (gameState.player1Id === myUserId) {
-                myRole = 1;
-            } else if (gameState.player2Id === myUserId) {
-                myRole = 2;
-            } else {
-                // 2. Versuche, einen freien Platz zu beanspruchen (Transaktion)
-                try {
-                    await runTransaction(db, async (transaction) => {
-                        const docSnap = await transaction.get(gameDocRef);
-                        const currentData = docSnap.data();
-                        
-                        if (!currentData.player1Id) {
-                            transaction.update(gameDocRef, { player1Id: myUserId });
-                            myRole = 1;
-                        } else if (!currentData.player2Id) {
-                            transaction.update(gameDocRef, { player2Id: myUserId });
-                            myRole = 2;
-                        } else {
-                            myRole = 0; // Zuschauer
-                        }
+        /**
+         * Beantragt die gewünschte Rolle in Firestore (Spieler 1 oder 2).
+         */
+        async function handleRoleSelection(role) {
+            if (!db || !myUserId) return showMessage('Verbindung wird hergestellt...', 'warning');
+
+            const gameDocRef = doc(db, GAME_DOC_PATH);
+            const playerKey = role === 1 ? 'player1Id' : 'player2Id';
+            const opponentKey = role === 1 ? 'player2Id' : 'player1Id';
+            const roleName = role === 1 ? 'Rot' : 'Blau';
+            
+            try {
+                await runTransaction(db, async (transaction) => {
+                    const docSnap = await transaction.get(gameDocRef);
+                    const currentData = docSnap.data();
+                    
+                    // 1. Prüfe, ob die Rolle bereits belegt ist (von jemand anderem)
+                    if (currentData[playerKey] && currentData[playerKey] !== myUserId) {
+                        throw new Error(`Spieler ${role} (${roleName}) ist bereits belegt.`);
+                    }
+                    
+                    // 2. Prüfe, ob ich bereits die andere Rolle habe und diese freigeben muss
+                    if (currentData[opponentKey] === myUserId) {
+                        transaction.update(gameDocRef, { [opponentKey]: null });
+                    }
+
+                    // 3. Rolle beanspruchen
+                    transaction.update(gameDocRef, { 
+                        [playerKey]: myUserId,
+                        lastUpdate: serverTimestamp() 
                     });
-                } catch (e) {
-                    console.warn("Rollen-Zuweisung fehlgeschlagen (evtl. Race Condition):", e);
-                    // Die onSnapshot wird mit den endgültigen Daten erneut ausgelöst
-                }
+                });
+                showMessage(`Rolle als Spieler ${role} (${roleName}) erfolgreich gewählt!`, 'success');
+            } catch (e) {
+                console.error("Rollen-Auswahl fehlgeschlagen:", e);
+                // Zeige dem Benutzer eine spezifische Fehlermeldung
+                showMessage(e.message || `Rolle ${roleName} ist belegt oder Transaktion fehlgeschlagen.`, 'error');
             }
         }
 
@@ -361,15 +418,15 @@
                 if (docSnap.exists()) {
                     gameState = docSnap.data();
                     
-                    // Bei jeder Statusänderung: Rolle überprüfen/bestätigen
-                    await assignRole(gameDocRef, gameState);
+                    // Bestimme meine Rolle nur basierend auf den aktuellen Daten
+                    determineRole(gameState);
 
                 } else {
-                    // Dokument existiert nicht, erstelle es (der Ersteller wird Player 1)
+                    // Dokument existiert nicht, erstelle es (der Ersteller wird Player 1, kann aber wechseln)
                     console.log("Game document does not exist. Creating new game.");
                     await setDoc(gameDocRef, { 
                         ...initialGameState, 
-                        player1Id: myUserId,
+                        player1Id: myUserId, // Auto-zuweisung bei Erstellung
                         lastUpdate: serverTimestamp(),
                     });
                     return; // onSnapshot wird mit den neuen Daten erneut ausgelöst
@@ -489,6 +546,7 @@
                     } else if (currentState === myRole) {
                         // Von der eigenen Farbe zurück auf Unmarkiert setzen (Rückgängig)
                         newCellState = 0;
+                        showMessage('Markierung zurückgesetzt.', 'success');
                     } else {
                         // Versucht, die Farbe des Gegners zu überschreiben
                         showMessage(`Feld ist bereits von Spieler ${3 - myRole} markiert!`, 'warning');
@@ -515,8 +573,8 @@
         
         // --- Initialization ---
 
-        // Initialisiert das gesamte Board (DOM-Struktur)
-        function initBoardDOM() {
+        // Initialisiert das gesamte Board (DOM-Struktur) und hängt Event Listener an
+        function initDOM() {
             for (let i = 0; i < BOARD_SIZE * BOARD_SIZE; i++) {
                 board.appendChild(createCell(i));
             }
@@ -524,6 +582,10 @@
             // Event Listener zu Buttons hinzufügen
             startButton.addEventListener('click', handleStartGame);
             resetButton.addEventListener('click', handleResetGame);
+            
+            // Neue Event Listener für Rollenwahl
+            selectRedButton.addEventListener('click', () => handleRoleSelection(1));
+            selectBlueButton.addEventListener('click', () => handleRoleSelection(2));
         }
 
         async function initFirebase() {
@@ -555,7 +617,7 @@
             }
             
             // Starte DOM und Firestore Listener
-            initBoardDOM();
+            initDOM();
             listenToGame();
         }
 
